@@ -1,0 +1,96 @@
+# Load necessary libraries
+library(dplyr)
+library(broom)
+
+# Read the data
+data <- read.csv('Real_Subspecialty_Breakdown.csv')
+colnames(data) <- c('subspecialty', 'Actual_Answer_ChatGPT', 'ChatGPT', 'Actual_Answer_Gemini', 'Gemini')
+
+# Calculate correctness for ChatGPT and Gemini
+data <- data %>%
+  mutate(ChatGPT_Correct = Actual_Answer_ChatGPT == ChatGPT,
+         Gemini_Correct = Actual_Answer_Gemini == Gemini)
+
+# Calculate overall statistics
+overall_stats <- data %>%
+  summarise(ChatGPT_Correct = sum(ChatGPT_Correct),
+            ChatGPT_Total = n(),
+            Gemini_Correct = sum(Gemini_Correct),
+            Gemini_Total = n()) %>%
+  mutate(ChatGPT_Accuracy = ChatGPT_Correct / ChatGPT_Total * 100,
+         Gemini_Accuracy = Gemini_Correct / Gemini_Total * 100)
+
+# Calculate chi-squared and Fisher's exact tests for overall data
+overall_contingency <- matrix(c(overall_stats$ChatGPT_Correct, overall_stats$ChatGPT_Total - overall_stats$ChatGPT_Correct,
+                                overall_stats$Gemini_Correct, overall_stats$Gemini_Total - overall_stats$Gemini_Correct),
+                              nrow = 2)
+
+chi_squared_test <- chisq.test(overall_contingency)
+fisher_test <- fisher.test(overall_contingency)
+
+# Add p-values to overall_stats
+overall_stats <- overall_stats %>%
+  mutate(chi2_p_value = chi_squared_test$p.value,
+         fisher_p_value = fisher_test$p.value)
+
+# Function to calculate 95% confidence intervals and margin of error for proportions
+confidence_interval <- function(successes, total) {
+  ci <- prop.test(successes, total)$conf.int * 100
+  proportion <- successes / total * 100
+  margin_of_error <- (ci[2] - ci[1]) / 2
+  return(c(proportion, ci[1], ci[2], margin_of_error))
+}
+
+# Add confidence intervals and margin of error to overall_stats
+overall_stats <- overall_stats %>%
+  mutate(ChatGPT_Accuracy_CI_Lower = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[2],
+         ChatGPT_Accuracy_CI_Upper = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[3],
+         ChatGPT_Margin_of_Error = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[4],
+         Gemini_Accuracy_CI_Lower = confidence_interval(Gemini_Correct, Gemini_Total)[2],
+         Gemini_Accuracy_CI_Upper = confidence_interval(Gemini_Correct, Gemini_Total)[3],
+         Gemini_Margin_of_Error = confidence_interval(Gemini_Correct, Gemini_Total)[4])
+
+# Calculate statistics by subspecialty
+subspecialty_stats <- data %>%
+  group_by(subspecialty) %>%
+  summarise(ChatGPT_Correct = sum(ChatGPT_Correct),
+            ChatGPT_Total = n(),
+            Gemini_Correct = sum(Gemini_Correct),
+            Gemini_Total = n()) %>%
+  mutate(ChatGPT_Accuracy = ChatGPT_Correct / ChatGPT_Total * 100,
+         Gemini_Accuracy = Gemini_Correct / Gemini_Total * 100)
+
+# Function to calculate p-values for chi-squared and Fisher's exact tests
+calculate_p_values <- function(row) {
+  contingency <- matrix(c(row$ChatGPT_Correct, row$ChatGPT_Total - row$ChatGPT_Correct,
+                          row$Gemini_Correct, row$Gemini_Total - row$Gemini_Correct),
+                        nrow = 2)
+  chi2_p_value <- tryCatch(chisq.test(contingency)$p.value, error = function(e) NA)
+  fisher_p_value <- tryCatch(fisher.test(contingency)$p.value, error = function(e) NA)
+  return(data.frame(chi2_p_value, fisher_p_value))
+}
+
+# Apply p-value calculation to each subspecialty
+p_values <- subspecialty_stats %>%
+  rowwise() %>%
+  do(calculate_p_values(.))
+
+# Combine p-values with subspecialty_stats
+subspecialty_stats <- bind_cols(subspecialty_stats, p_values)
+
+# Add confidence intervals and margin of error to subspecialty_stats
+subspecialty_stats <- subspecialty_stats %>%
+  rowwise() %>%
+  mutate(ChatGPT_Accuracy_CI_Lower = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[2],
+         ChatGPT_Accuracy_CI_Upper = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[3],
+         ChatGPT_Margin_of_Error = confidence_interval(ChatGPT_Correct, ChatGPT_Total)[4],
+         Gemini_Accuracy_CI_Lower = confidence_interval(Gemini_Correct, Gemini_Total)[2],
+         Gemini_Accuracy_CI_Upper = confidence_interval(Gemini_Correct, Gemini_Total)[3],
+         Gemini_Margin_of_Error = confidence_interval(Gemini_Correct, Gemini_Total)[4])
+
+# Combine overall_stats with subspecialty_stats
+overall_stats <- mutate(overall_stats, subspecialty = 'overall')
+all_stats <- bind_rows(subspecialty_stats, overall_stats)
+
+# Print results
+print(all_stats)
