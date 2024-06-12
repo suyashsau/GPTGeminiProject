@@ -1,0 +1,112 @@
+# Install and load necessary packages
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("broom")
+
+library(readxl)
+library(dplyr)
+library(broom)
+
+# Read the Excel file
+file_path <- "AIProjectOrderSheet.xlsx"
+data <- read_excel(file_path)
+
+# Rename columns for easier access
+colnames(data) <- c('Problem_Difficulty_Order', 'Actual_Answer', 'Chat_GPT_4o', 'Actual_Answer_1', 'Gemeni', 'Subspeciality')
+
+# Calculate correctness
+data <- data %>%
+  mutate(
+    Chat_GPT_4o_Correct = Actual_Answer == Chat_GPT_4o,
+    Gemeni_Correct = Actual_Answer == Gemeni
+  )
+
+# Summarize data by problem difficulty order
+summary_data <- data %>%
+  group_by(Problem_Difficulty_Order) %>%
+  summarize(
+    Chat_GPT_4o_Correct = sum(Chat_GPT_4o_Correct),
+    Chat_GPT_4o_Total = n(),
+    Gemeni_Correct = sum(Gemeni_Correct),
+    Gemeni_Total = n()
+  )
+
+# Function to calculate 95% confidence interval for a proportion
+confidence_interval <- function(correct, total) {
+  prop.test(correct, total)$conf.int
+}
+
+# Function to calculate p-value for comparing proportions
+p_value_for_proportions <- function(correct1, total1, correct2, total2) {
+  prop.test(c(correct1, correct2), c(total1, total2))$p.value
+}
+
+# Calculate confidence intervals and p-values
+summary_data <- summary_data %>%
+  mutate(
+    Chat_GPT_4o_Prop = Chat_GPT_4o_Correct / Chat_GPT_4o_Total,
+    Gemeni_Prop = Gemeni_Correct / Gemeni_Total,
+    Chat_GPT_4o_CI = mapply(confidence_interval, Chat_GPT_4o_Correct, Chat_GPT_4o_Total),
+    Gemeni_CI = mapply(confidence_interval, Gemeni_Correct, Gemeni_Total),
+    p_value = mapply(p_value_for_proportions, Chat_GPT_4o_Correct, Chat_GPT_4o_Total, Gemeni_Correct, Gemeni_Total)
+  )
+
+# Extract lower and upper confidence intervals
+summary_data <- summary_data %>%
+  rowwise() %>%
+  mutate(
+    Chat_GPT_4o_CI_Lower = Chat_GPT_4o_CI[1],
+    Chat_GPT_4o_CI_Upper = Chat_GPT_4o_CI[2],
+    Gemeni_CI_Lower = Gemeni_CI[1],
+    Gemeni_CI_Upper = Gemeni_CI[2]
+  ) %>%
+  select(-Chat_GPT_4o_CI, -Gemeni_CI)
+
+# Calculate overall statistics
+overall_stats <- data.frame(
+  Model = c('Chat GPT 4o', 'Gemeni'),
+  Correct = c(sum(data$Chat_GPT_4o_Correct), sum(data$Gemeni_Correct)),
+  Incorrect = c(sum(!data$Chat_GPT_4o_Correct), sum(!data$Gemeni_Correct)),
+  Correct_Percent = c(mean(data$Chat_GPT_4o_Correct) * 100, mean(data$Gemeni_Correct) * 100)
+)
+
+# Calculate confidence intervals for overall statistics
+overall_stats <- overall_stats %>%
+  mutate(
+    CI_Lower = c(confidence_interval(sum(data$Chat_GPT_4o_Correct), nrow(data))[1] * 100, confidence_interval(sum(data$Gemeni_Correct), nrow(data))[1] * 100),
+    CI_Upper = c(confidence_interval(sum(data$Chat_GPT_4o_Correct), nrow(data))[2] * 100, confidence_interval(sum(data$Gemeni_Correct), nrow(data))[2] * 100)
+  )
+
+# Calculate overall p-value
+overall_p_value <- p_value_for_proportions(sum(data$Chat_GPT_4o_Correct), nrow(data), sum(data$Gemeni_Correct), nrow(data))
+overall_stats$p_value <- overall_p_value
+
+# Calculate average question order
+average_order_chat_gpt_4o <- mean(data[data$Chat_GPT_4o_Correct == TRUE, ]$Problem_Difficulty_Order)
+average_order_gemeni <- mean(data[data$Gemeni_Correct == TRUE, ]$Problem_Difficulty_Order)
+average_order_overall <- mean(data$Problem_Difficulty_Order)
+
+# Calculate p-value for average question order differences
+t_test_gpt <- t.test(data[data$Chat_GPT_4o_Correct == TRUE, ]$Problem_Difficulty_Order, mu = average_order_overall)
+t_test_gemeni <- t.test(data[data$Gemeni_Correct == TRUE, ]$Problem_Difficulty_Order, mu = average_order_overall)
+p_value_gpt_overall <- t_test_gpt$p.value
+p_value_gemeni_overall <- t_test_gemeni$p.value
+
+# Calculate p-values between the performance of GPT and Gemeni on different order questions
+summary_data <- summary_data %>%
+  mutate(
+    p_value_order = mapply(p_value_for_proportions, Chat_GPT_4o_Correct, Chat_GPT_4o_Total, Gemeni_Correct, Gemeni_Total)
+  )
+
+# Print the results
+print(overall_stats)
+print(summary_data)
+print(paste("Average question order for Chat GPT 4o:", average_order_chat_gpt_4o))
+print(paste("Average question order for Gemeni:", average_order_gemeni))
+print(paste("Average question order overall:", average_order_overall))
+print(paste("p-value for Chat GPT 4o vs overall question order:", p_value_gpt_overall))
+print(paste("p-value for Gemeni vs overall question order:", p_value_gemeni_overall))
+
+# Save the final data to a new Excel file
+write.csv(overall_stats, "overall_stats.csv", row.names = FALSE)
+write.csv(summary_data, "summary_data.csv", row.names = FALSE)
