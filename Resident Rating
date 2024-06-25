@@ -1,0 +1,47 @@
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+library(stats)
+
+# Load the CSV file
+data <- read.csv('/path/to/your/AIProjectOrderSheet.csv')
+
+# Clean the column names for easier access
+colnames(data) <- c('Problem_Difficulty_Order', 'Actual_Answer', 'Chat_GPT_4o', 'Gemini', 'Resident_Rating_GPT_4o', 'Resident_Rating_Gemini')
+
+# Drop rows with missing values
+data <- na.omit(data)
+
+# Calculate the mean resident rating for each problem difficulty order
+grouped_data <- data %>%
+  group_by(Problem_Difficulty_Order) %>%
+  summarise(
+    mean_resident_rating_gpt4o = mean(Resident_Rating_GPT_4o),
+    mean_resident_rating_gemini = mean(Resident_Rating_Gemini)
+  )
+
+# Calculate the fraction of total questions for each problem difficulty order
+total_questions <- nrow(data)
+fraction_total_questions <- data %>%
+  count(Problem_Difficulty_Order) %>%
+  mutate(fraction = paste(n, total_questions, sep = "/"))
+
+# Merge the fractions with the grouped data
+merged_data <- grouped_data %>%
+  left_join(fraction_total_questions, by = "Problem_Difficulty_Order") %>%
+  select(Problem_Difficulty_Order, mean_resident_rating_gpt4o, mean_resident_rating_gemini, fraction)
+
+# Calculate p-values for the mean resident ratings for each question order
+p_values <- sapply(unique(data$Problem_Difficulty_Order), function(order) {
+  subset <- data %>% filter(Problem_Difficulty_Order == order)
+  t.test(subset$Resident_Rating_GPT_4o, subset$Resident_Rating_Gemini, var.equal = FALSE)$p.value
+})
+
+# Add p-values to the merged data
+merged_data$p_value <- p_values
+
+# Print the final data frame
+print(merged_data)
+
+# Save the final data frame to a CSV file
+write.csv(merged_data, '/path/to/your/Corrected_Statistics_Table_with_Accurate_Fractions.csv', row.names = FALSE)
