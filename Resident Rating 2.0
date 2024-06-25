@@ -1,0 +1,26 @@
+# Load necessary library
+library(tidyverse)
+
+# Load the data
+data <- read.csv("/path/to/AIProjectOrderSheet.csv")
+
+# Extract the relevant columns
+gpt4_ratings <- data[, 5]
+gemini_ratings <- data[, 6]
+
+# Calculate mean ratings
+mean_gpt4 <- mean(gpt4_ratings, na.rm = TRUE)
+mean_gemini <- mean(gemini_ratings, na.rm = TRUE)
+
+# Perform t-test to calculate p-value
+t_test_result <- t.test(gpt4_ratings, gemini_ratings, na.rm = TRUE)
+
+# Summary statistics
+summary_stats <- data.frame(
+  Mean_GPT4_Rating = mean_gpt4,
+  Mean_Gemini_Rating = mean_gemini,
+  p_value = t_test_result$p.value
+)
+
+# Print the summary statistics
+print(summary_stats)
